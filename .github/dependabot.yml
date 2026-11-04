@@ -1,0 +1,29 @@
+version: 2
+updates:
+  - package-ecosystem: terraform
+    directories:
+      - /envs/prod
+      - /modules/github-oidc
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "terraform"
+    groups:
+      terraform-providers:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

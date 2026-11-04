@@ -1,0 +1,77 @@
+# Static checks of the Terraform code. They need no access to Azure or to the state, so the
+# job holds no cloud credentials. Plans and applies are run by a team member (README.md).
+name: terraform
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true  # safe: these checks never touch the state
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  # Tool versions in one place. Dependabot does not see these lines (it updates only the actions
+  # and the providers): bump them by hand, monthly (README.md, "Tool versions").
+  TERRAFORM_VERSION: "1.17.1"
+  TFLINT_VERSION: "v0.65.0"
+  CHECKOV_VERSION: "3.4.3"
+
+jobs:
+  checks:
+    name: fmt, validate, test, lint, scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false  # real exit codes and plain output
+
+      - name: Format
+        run: terraform fmt -check -recursive -diff
+
+      - name: Validate envs/prod
+        run: |
+          terraform -chdir=envs/prod init -backend=false
+          terraform -chdir=envs/prod validate
+
+      - name: Validate and test modules/github-oidc (mock provider, plan only)
+        run: |
+          terraform -chdir=modules/github-oidc init -backend=false
+          terraform -chdir=modules/github-oidc validate
+          terraform -chdir=modules/github-oidc test
+
+      - name: Set up TFLint
+        uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337  # v6.3.2
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+
+      - name: TFLint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}  # avoids the rate limit when downloading the ruleset plugin
+        run: |
+          tflint --init
+          tflint --recursive --format compact
+
+      - name: Checkov
+        run: >-
+          pipx run --spec "checkov==${CHECKOV_VERSION}" checkov
+          --directory .
+          --framework terraform github_actions
+          --compact
+          --quiet

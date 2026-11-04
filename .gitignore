@@ -1,0 +1,30 @@
+# Local provider and module cache
+.terraform/
+
+# State and plan files: state lives in Azure Storage, plans hold sensitive values
+*.tfstate
+*.tfstate.*
+*.tfplan
+plan.txt
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Local override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI configuration and variable files (values come from TF_VAR_* environment variables)
+.terraformrc
+terraform.rc
+*.tfvars
+*.tfvars.json
+
+# Backend settings of each member (copy backend.hcl.example to backend.hcl)
+backend.hcl
+
+# Only the root configuration's dependency lock file is committed
+modules/**/.terraform.lock.hcl

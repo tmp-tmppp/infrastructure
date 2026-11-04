@@ -1,0 +1,6 @@
+# Copy to backend.hcl (ignored by Git) and fill in the storage account name from the bootstrap.
+# Names only: no keys, tokens or IDs belong here.
+resource_group_name  = "rso-tfstate-rg"
+storage_account_name = "<state-storage-account-name>"
+container_name       = "tfstate"
+key                  = "prod.terraform.tfstate"
