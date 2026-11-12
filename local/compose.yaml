@@ -65,7 +65,7 @@ services:
   # http://localhost:9001/health/ready. The local login of the administrator and of the platform administrator are
   # below.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.2@sha256:3879c623248408de29a5303178b5816c77e8dfef3890c361f8c0bbeaa979ba3b
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:c68e286cacd87b942ac1939a0a1481461109d6acd3a57dc496969a319a76bbf0
     command: ["start-dev", "--import-realm"]
     depends_on:
       postgres:
@@ -134,7 +134,7 @@ services:
   # mails sit in Mailpit's temporary database inside the container and are gone with it. The pin is the one of
   # identity/compose.yaml.
   mailpit:
-    image: axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+    image: axllent/mailpit:v1.33.1@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
     mem_limit: 128m
     ports:
       - "127.0.0.1:8025:8025"
