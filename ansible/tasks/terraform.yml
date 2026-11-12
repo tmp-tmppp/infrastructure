@@ -1,0 +1,18 @@
+---
+# The zip from releases.hashicorp.com, checked against the SHA256SUMS file of the release (which HashiCorp also signs;
+# the playbook trusts the checksum over TLS, not the signature).
+- name: Install Terraform
+  ansible.builtin.include_tasks:
+    file: install_tool.yml
+    apply:
+      tags: [terraform]
+  vars:
+    tool_name: terraform
+    tool_version: "{{ terraform_version }}"
+    tool_kind: archive
+    tool_url: "https://releases.hashicorp.com/terraform/{{ terraform_version }}/terraform_{{ terraform_version }}_{{ tool_os }}_{{ tool_arch }}.zip"
+    tool_checksum: "https://releases.hashicorp.com/terraform/{{ terraform_version }}/terraform_{{ terraform_version }}_SHA256SUMS"
+    tool_unpack_opts: []
+    tool_links:
+      - path: terraform
+        link: terraform

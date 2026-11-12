@@ -1,0 +1,45 @@
+---
+# Every version the playbook installs, in one place. Change a version here (and nowhere else), run the playbook with
+# --check --diff, then for real. Bump them by hand: Dependabot does not read this file.
+#
+# Where a version comes from (read 2026-11-11):
+#   node_version         the Node of the services' Dockerfiles (node:24.22.2) and of their engines (>=24)
+#   helm_version         ADR-047, the version of the pipelines
+#   kubeconform_version  the version of the gateway and the pipelines
+#   terraform_version    TERRAFORM_VERSION of .github/workflows/terraform.yml (envs/prod needs >= 1.17, < 2.0)
+#   kubectl_version      the latest patch of 1.35, the Kubernetes version the charts are checked against (kubeconform
+#                        -kubernetes-version 1.35.0); kubectl may differ by one minor version from the cluster
+#   azure_cli_version, docker_*  the versions in the vendors' apt repositories on the day of writing
+
+node_version: "24.22.2"
+helm_version: "4.3.1"
+kubeconform_version: "0.8.0"
+terraform_version: "1.17.1"
+kubectl_version: "1.35.10"
+kind_version: "0.33.0"
+
+# kind (a local Kubernetes cluster in Docker) is optional: plan Q-17, only if the lab instructor asks for it.
+# Turn it on with -e install_kind=true.
+install_kind: false
+
+# Azure CLI from Microsoft's apt repository: <version>-1~<release name of the distribution>.
+azure_cli_version: "2.92.0-1~{{ ansible_facts['distribution_release'] }}"
+
+# Docker Engine and its plugins from Docker's apt repository. A version string in that repository carries the name of the
+# distribution, so the pins are patterns (the major version): apt takes the newest package that matches, and a package
+# that is installed and matches changes nothing. A newer major version is a decision: change the pattern.
+docker_ce_version: "5:29.*"
+docker_containerd_version: "2.*"
+docker_buildx_version: "0.*"
+docker_compose_plugin_version: "5.*"
+
+# Adding yourself to the docker group lets you run docker without sudo, and also makes you root on this machine (anyone
+# in the group can mount the whole file system into a container). Off by default.
+docker_add_user_to_group: false
+
+# Where tools are installed. Each version has a folder of its own below tools_root and a link in tools_bin points to it,
+# so a new version never overwrites the old one and a rollback is one changed variable.
+tools_root: /usr/local/lib/rso-tools
+tools_bin: /usr/local/bin
+# Where downloads are kept (the archives checked by checksum); safe to delete.
+download_dir: "{{ ansible_facts['user_dir'] }}/.cache/rso-dev-setup"

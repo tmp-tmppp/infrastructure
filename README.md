@@ -10,6 +10,9 @@ Infrastructure as code for **Chance**, written in Terraform. One root configurat
    `production` environment and branch ruleset of the service repositories.
    This replaces clicking through the settings pages: every change is a reviewed pull request.
 
+A second root configuration, `envs/test`, does the same for the test organization `tmp-tmppp`, with
+its own state and its own deploy identity ([Test organization](#test-organization-tmp-tmppp)).
+
 ## What is managed, and what deliberately is not
 
 | Managed here | Where |
@@ -46,7 +49,7 @@ lockfile, passing tests, a chart that lints.
 ## Layout
 
 ```
-envs/prod/            the only root configuration (prod is the only environment in Azure)
+envs/prod/            root configuration for RSO-ekipa10 (prod is the only environment in Azure)
   versions.tf         Terraform and provider versions
   backend.tf          remote state in Azure Storage (partial configuration)
   backend.hcl.example copy to backend.hcl and fill in the storage account name
@@ -57,10 +60,32 @@ envs/prod/            the only root configuration (prod is the only environment 
                       environment, ruleset
   imports.tf          next step, disabled: adopt rso-rg and rso-cluster
   outputs.tf          client ID, principal ID, expected OIDC subjects
+envs/test/            the same for the test organization tmp-tmppp: own state key, own identity,
+                      reads rso-rg and rso-cluster only (see Test organization)
 modules/github-oidc/  reusable: identity + one federated credential per repository + roles
   tests/              terraform test with a mock provider (plan only, no Azure access)
 .tflint.hcl           TFLint with the azurerm ruleset
+local/                the shared dependencies for local development (compose.yaml) and the runbook
+  e2e/                the local end-to-end run against those dependencies and a real Keycloak
+ansible/              playbook for the development machine: pinned tools, read-only checks
 ```
+
+## Local development and the development machine
+
+Neither folder touches Azure, GitHub or the cluster.
+
+- [`local/`](local/README.md): `docker compose up -d --wait` starts the dependencies of the services (PostgreSQL 18 with
+  one database and one login per service, NATS with JetStream, Keycloak with the realm of `identity`, Mailpit and the mock
+  payment provider), and the runbook runs one service, or several, natively against them. A local kind cluster with the
+  dev Helm values is described there as an option only.
+- [`local/e2e/`](local/e2e/README.md): `bash run.sh all` starts those dependencies and the seven services from their
+  built `dist/`, drives the main flows through a real Keycloak (sign-up with e-mail verification, a tenant, an invite,
+  a share link, deposits, a trade, a withdrawal over gRPC, the audit chain, metrics), prints each check as PASS or FAIL
+  and removes everything again (about 4 minutes).
+- [`ansible/`](ansible/README.md): an idempotent playbook for `localhost` that installs the command-line tools (Node.js,
+  Docker with the compose plugin, kubectl, Helm, kubeconform, Azure CLI, Terraform, optionally kind) at pinned versions and
+  ends with read-only checks. Dry run first (`--check --diff`), then the real run. It never deploys into Kubernetes: that
+  stays with Helm and the pipelines.
 
 ## OIDC subject
 
@@ -85,7 +110,8 @@ with that output.
 
 ## Prerequisites
 
-Terraform 1.17.x, Azure CLI, GitHub CLI.
+Terraform 1.17.x, Azure CLI, GitHub CLI. [`ansible/`](ansible/README.md) installs Terraform and the Azure CLI, with the
+other tools of the project, at pinned versions (not the GitHub CLI).
 
 Your Azure account needs Owner on the subscription, or at least on `rso-rg` (Contributor plus
 User Access Administrator or Role Based Access Control Administrator also works). Terraform
@@ -287,6 +313,153 @@ the unlock.
 
 One identity holds at most 20 federated credentials; the module checks that.
 
+## Test organization (tmp-tmppp)
+
+Until the team decides otherwise, the project's repositories live in the test organization
+`tmp-tmppp` (public repositories, the same shared pipeline, `tmp-tmppp/.github`), and nothing goes
+to RSO-ekipa10. `envs/test` is a second root configuration that gives the test organization what
+`envs/prod` gives RSO-ekipa10. Its state has its own key (`test.terraform.tfstate`, same storage
+account and container), so it never reads, locks or changes the state or the objects of
+`envs/prod`. Do not plan or apply `envs/prod` while the test organization is in use: its apply
+writes to RSO-ekipa10.
+
+| | `envs/prod` (RSO-ekipa10) | `envs/test` (tmp-tmppp) |
+|---|---|---|
+| State key | `prod.terraform.tfstate` | `test.terraform.tfstate` |
+| Deploy identity | `rso-github-deploy` | `rso-github-deploy-test`, one federated credential for each of the same 14 repositories in tmp-tmppp (environment `production`) |
+| Role on `rso-cluster` | Cluster User | the same |
+| `rso-rg`, `rso-cluster` | read; adoption prepared in `imports.tf` | read only, never imported: one object, one state |
+| `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` | written | written: the test identity's client ID, the same tenant and subscription |
+| `DOCKERHUB_USERNAME` | written by Terraform | set by hand, like `PUBLIC_HOST`, `ACME_EMAIL` and the secrets (the repository script prints the commands) |
+| Team `devs` | made by hand, read | created by Terraform with both members (`TF_VAR_devs_members`) as maintainers; write access to prod's 16 repositories plus `infrastructure` |
+| Repository settings | `markets` adopted | all 14 service repositories adopted with one `for_each` import: wiki off and the description that the script sets |
+| Environment `production` and its policy `main` | adopted for `markets` | owned by the repository script, not by Terraform (one owner per object) |
+| Ruleset on the default branch | `markets` | all 14 service repositories; enforcement from `ruleset_enforcement` (default `active`) |
+| Dependabot alerts | GitHub's default | turned on (`github_repository_vulnerability_alerts`), because the security updates need them |
+
+Shared with `envs/prod` on purpose: the cluster, its namespaces and Helm release names, and the
+Docker Hub namespace. **Only one organization may run deploy jobs at a time**, or each overwrites
+the other's releases and image tags. Both identities are effectively cluster admins.
+
+### Order of steps
+
+1. The member who runs Terraform is an owner of tmp-tmppp, both members are in the organization,
+   and the state storage exists ([bootstrap](#one-time-bootstrap-the-state-storage)).
+2. **Repositories first.** Run the team's repository script (`create_test_repos.sh`) without
+   arguments (a dry run), then with `--apply`. It creates the repositories, the environment
+   `production` limited to `main` for the 14 service repositories, and pushes `main`; the first
+   commits must be on `main` before the rulesets exist. Then set the variables and secrets it
+   prints, by hand.
+3. Read-only checks:
+   ```bash
+   gh api repos/tmp-tmppp/markets/actions/oidc/customization/sub   # "use_immutable_subject": true, as in RSO-ekipa10
+   gh api orgs/tmp-tmppp/members --jq '.[].login'                 # both members
+   gh api orgs/tmp-tmppp/repos --paginate --jq '.[].name' | sort  # the 14 service repositories, .github, audit-export, infrastructure
+   for r in markets trading market-data market-maker broker observability tenants payments audit payment-provider identity gateway database web; do
+     gh api "repos/tmp-tmppp/$r/branches/main" --jq .name > /dev/null 2>&1 || echo "$r: no main"
+   done                                                          # must print nothing
+   ```
+   If a repository has no `main`, stop: commit in its folder, run the script again, and check
+   again. The rulesets of the apply require a pull request for every change to `main`, so a
+   repository whose `main` does not exist yet could not get its first commit by a push.
+   If `use_immutable_subject` is not `true`, stop: the federated credentials expect the ID-based
+   subject ([OIDC subject](#oidc-subject)), and every `azure/login` would fail with `AADSTS700213`.
+4. Session, as in [Every session](#every-session) (without its `TF_VAR_dockerhub_username` line
+   and without its `envs/prod` init line), with a token of a tmp-tmppp owner, plus:
+   ```bash
+   cp envs/test/backend.hcl.example envs/test/backend.hcl   # set storage_account_name; key stays test.terraform.tfstate
+   export TF_VAR_devs_members='["<member-1>","<member-2>"]'  # GitHub user names, without @
+   terraform -chdir=envs/test init -backend-config=backend.hcl
+   terraform -chdir=envs/test state list                     # before the first apply: prints nothing
+   ```
+   Never copy `envs/prod/backend.hcl` here: with prod's key the test plan would plan against prod's
+   state (it would replace prod's deploy identity and destroy its repository settings). `state
+   list` must print nothing before the first apply and only test addresses later; any address such
+   as `github_repository.markets` or `github_actions_organization_variable.dockerhub_username`
+   means the backend points at prod: stop, fix `backend.hcl` and run `init -reconfigure`.
+5. Plan: `terraform -chdir=envs/test plan -out=plan.tfplan`. With two members it must say
+   **`14 to import, 83 to add, 14 to change, 0 to destroy`**:
+   - import: `github_repository.service["<repository>"]`, 14;
+   - add, Azure (16): the identity, its 14 federated credentials, its role on the cluster;
+   - add, organization (5): `AZURE_CLIENT_ID`, the secrets `AZURE_TENANT_ID` and
+     `AZURE_SUBSCRIPTION_ID` and their repository access;
+   - add, team (20): the team, 2 memberships, access to 17 repositories;
+   - add, per service repository (3 x 14): Dependabot alerts, Dependabot security updates, the ruleset;
+   - change: each `github_repository.service` with exactly `archive_on_destroy`,
+     `ignore_vulnerability_alerts_during_read` (Terraform-only values) and `security_and_analysis`
+     (secret scanning and push protection, if they are off). Any other `~` line is drift: copy
+     GitHub's value into `envs/test/github.tf` instead of accepting it.
+   Stop on any destroy or replacement, and on any address that is not in this list.
+6. Review as in the [routine](#routine-plan-review-apply), then apply exactly that plan:
+   `terraform -chdir=envs/test apply plan.tfplan`, and delete `envs/test/plan.tfplan`.
+7. Check (names and statuses only):
+   ```bash
+   gh api orgs/tmp-tmppp/actions/secrets --jq '.secrets[].name'
+   gh api orgs/tmp-tmppp/actions/variables --jq '.variables[].name'
+   gh api repos/tmp-tmppp/markets/rulesets --jq '.[] | [.name, .enforcement] | @tsv'
+   gh api repos/tmp-tmppp/markets/codeowners/errors              # expect "errors": []
+   terraform -chdir=envs/test output deploy_oidc_subjects
+   ```
+
+From the apply on, `main` of each service repository takes changes only through a pull request
+with a green `pipeline / test`; the script's push of `main` is then rejected for those
+repositories. To pause the rulesets without deleting them, set the default of
+`ruleset_enforcement` in `envs/test/variables.tf` to `disabled` in a pull request, plan and apply
+(not only per session with `TF_VAR_`, or the next plan turns them on again). A new service
+repository goes into `local.deploy_repositories` of `envs/test/azure.tf` and into the script's
+list (one identity holds at most 20 credentials: 6 more fit).
+
+### Moving to RSO-ekipa10
+
+When the team moves the project to RSO-ekipa10:
+
+1. Point the pipeline callers at `RSO-ekipa10/.github` again and set up `envs/prod` as in
+   [First apply](#first-apply). Nothing of `envs/test` carries over: the prod identity, its
+   credentials and the RSO-ekipa10 settings are separate objects.
+2. Stop the test organization's deploy jobs before the first prod deploy (shared cluster).
+3. Retire `envs/test` in a pull request, before the test organization is deleted (with the
+   organization gone, the GitHub deletes fail):
+   - in `envs/test/github.tf`, delete the `github_repository.service` block and its `import`
+     block, add the block below, and write `each.key` instead of
+     `github_repository.service[each.key].name` (three places). The repositories stay as they are.
+     ```hcl
+     removed {
+       from = github_repository.service
+       lifecycle {
+         destroy = false
+       }
+     }
+     ```
+   - `terraform -chdir=envs/test plan -out=plan.tfplan`: 0 to add, 0 to change, 0 to destroy;
+     the 14 repositories are listed as no longer managed by Terraform. Apply that plan. Now no
+     repository is left in this state.
+   - `terraform -chdir=envs/test plan -destroy -out=destroy.tfplan`: with two members, 83 to
+     destroy. Every address must belong to `envs/test`: the test identity, its credentials and
+     its role assignment, the tmp-tmppp variable, secrets, team, team access, alerts, security
+     updates and rulesets. Stop on anything else.
+   - `terraform -chdir=envs/test apply destroy.tfplan`. This deletes the test identity, so the
+     public test repositories can no longer log in to Azure.
+4. Delete `envs/test`, its step in `.github/workflows/terraform.yml`, its line in
+   `.github/dependabot.yml` and this section; then delete the state blob
+   (`az storage blob delete --account-name rsotfstate1318 -c tfstate -n test.terraform.tfstate --auth-mode login`).
+   Blob versioning is on (bootstrap), so the deleted state stays as earlier versions of the blob,
+   with the tenant, subscription and identity IDs in them: list them with `az storage blob list
+   --account-name rsotfstate1318 -c tfstate --include v --prefix test.terraform.tfstate
+   --auth-mode login` and delete each with `az storage blob delete ... --version-id <id>`.
+   Delete or archive the test organization by hand if the team wants.
+
+### Costs of the test setup
+
+The identity, its federated credentials and its role assignment are free; the state blob is a few
+kilobytes (well under USD 0.01 a month, in the account that already exists); the GitHub
+variables, secrets, team, rulesets, secret scanning, push protection and Dependabot are free on
+public repositories. Plan and apply are free and work while the cluster is stopped (they read only
+its ID). A deploy from the test organization needs the cluster running, which costs the same as
+for prod: about USD 0.14 an hour per DS2_v2 node and at least two nodes (autoscaler 2 to 5), so
+at least about USD 0.28 an hour, plus disk, IP and load balancer (ADR-039, Sweden Central list
+price; the cluster's own region is not checked). The test organization adds no cluster cost of its
+own, and only one of the two organizations deploys at a time.
+
 ## Secrets and identifiers
 
 Terraform writes every value it manages into the state file. So credentials stay out of
@@ -333,6 +506,13 @@ and Checkov (`CHECKOV_VERSION`). Bump them by hand, monthly: look up the latest 
 and let the pull request's `terraform` check pass. Pull the matching local Docker images
 (`hashicorp/terraform:<version>`, `ghcr.io/terraform-linters/tflint:<version>`) at the same
 time.
+
+Two more files hold versions by hand. `local/compose.yaml` pins the images of the local dependencies (PostgreSQL, NATS,
+Keycloak, Mailpit) and repeats the pins of the services' compose files and of the broker and `identity` Dockerfiles:
+change them together. `ansible/vars/versions.yml` pins the tools of the development machine; the Terraform version there
+repeats `TERRAFORM_VERSION` and the `versions.tf` files, and the Helm and kubeconform versions repeat the pipelines'.
+Dependabot reads `local/compose.yaml` (image tags) and `ansible/requirements.txt` (ansible-core and ansible-lint) and
+proposes those bumps; it does not read `versions.yml`.
 
 ## Costs
 

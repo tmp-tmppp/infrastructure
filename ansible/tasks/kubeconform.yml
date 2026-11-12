@@ -1,0 +1,17 @@
+---
+# The archive of the GitHub release, checked against the CHECKSUMS file of the same release.
+- name: Install kubeconform
+  ansible.builtin.include_tasks:
+    file: install_tool.yml
+    apply:
+      tags: [kubeconform]
+  vars:
+    tool_name: kubeconform
+    tool_version: "{{ kubeconform_version }}"
+    tool_kind: archive
+    tool_url: "https://github.com/yannh/kubeconform/releases/download/v{{ kubeconform_version }}/kubeconform-{{ tool_os }}-{{ tool_arch }}.tar.gz"
+    tool_checksum: "https://github.com/yannh/kubeconform/releases/download/v{{ kubeconform_version }}/CHECKSUMS"
+    tool_unpack_opts: []
+    tool_links:
+      - path: kubeconform
+        link: kubeconform

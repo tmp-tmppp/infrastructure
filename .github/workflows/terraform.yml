@@ -50,6 +50,11 @@ jobs:
           terraform -chdir=envs/prod init -backend=false
           terraform -chdir=envs/prod validate
 
+      - name: Validate envs/test (test organization)
+        run: |
+          terraform -chdir=envs/test init -backend=false
+          terraform -chdir=envs/test validate
+
       - name: Validate and test modules/github-oidc (mock provider, plan only)
         run: |
           terraform -chdir=modules/github-oidc init -backend=false

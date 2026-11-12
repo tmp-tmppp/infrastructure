@@ -1,0 +1,6 @@
+---
+# The strictest profile. Run from this folder: ansible-lint
+profile: production
+exclude_paths:
+  - .venv/
+  - .ansible/

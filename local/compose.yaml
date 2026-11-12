@@ -1,0 +1,182 @@
+# The shared development dependencies of Chance on one machine: PostgreSQL 18 (one database and one login role per
+# service), NATS with JetStream, Keycloak with the realm of the identity repository, Mailpit and the mock payment
+# provider. The services themselves are not in this file: you run one natively against these dependencies, or several
+# (README.md), or one of them from its own compose file.
+#
+#   docker compose up -d --wait         start everything and wait until every healthcheck passes
+#   docker compose up -d --wait postgres nats        only what the service you work on needs
+#   docker compose down                 stop, keep the data
+#   docker compose down -v              stop and delete the data (databases, streams, the Keycloak realm, the mails)
+#
+# Do not start this file together with a service's own compose file: both publish PostgreSQL on 5432, NATS on 4222 and
+# Keycloak or the provider on 8081 and 8082 (the same host ports as the services' compose files use).
+# Every published port is bound to 127.0.0.1: nothing here is reachable from the network.
+# The passwords, keys and secrets below are local development values only, the same ones as in the compose files of the
+# services; real ones live in the Secrets of the cluster (and never in a file).
+name: chance-local
+
+services:
+  # One server, one database and one login role per service (DM-01): postgres/init/10-create-databases.sql creates
+  # them when the data volume is empty (see there for adding one later). Each service creates its own tables at start
+  # (its migrations); Keycloak creates its own too.
+  postgres:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres-local # hooks:allow local development only
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # PostgreSQL 18 keeps the data in a version folder below this one (as in the services' compose files).
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Over TCP on purpose: while the image runs the init scripts its temporary server listens on the socket only, so a
+      # check on the socket would pass before the databases exist.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # The same server version and flags as the broker repository's compose file (nats 2.15.2, JetStream on a volume);
+  # the streams of the services (STREAM_MAX_AGE_DAYS, 30 days by default) are created by the publishers.
+  nats:
+    image: nats:2.15.2-alpine
+    command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      # The monitoring port answers 200 once the server and JetStream are up (the cluster's readiness probe uses it too).
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8222/healthz?js-server-only=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # The identity provider: the stock Keycloak image of the identity repository (same version and digest) in development
+  # mode, with that repository's realm file mounted read-only and imported on the first start. Its own database is
+  # "keycloak" on the PostgreSQL server above. Development mode builds the server at start, so the first start takes
+  # about a minute; the repository's own image (identity/Dockerfile, optimized, read-only file system) is what runs in
+  # the cluster and what identity/compose.yaml starts. The realm is imported only when it does not exist yet: after a
+  # change of the realm file, `docker compose down -v` and start again.
+  # Realm "chance": http://localhost:8081/realms/chance, admin console http://localhost:8081/admin, health on
+  # http://localhost:9001/health/ready. The local login of the administrator and of the platform administrator are
+  # below.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:3879c623248408de29a5303178b5816c77e8dfef3890c361f8c0bbeaa979ba3b
+    command: ["start-dev", "--import-realm"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak # hooks:allow local development only
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME: http://localhost:8081
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin-local-only # hooks:allow local development only
+      # The placeholders of identity/realm/chance-realm.json, filled when the realm is imported.
+      CHANCE_WEB_URL: http://localhost:5173
+      TENANTS_CLIENT_SECRET: tenants-local-secret # hooks:allow local development only
+      PAYMENTS_CLIENT_SECRET: payments-local-secret # hooks:allow local development only
+      MARKET_MAKER_CLIENT_SECRET: market-maker-local-secret # hooks:allow local development only
+      MARKETS_CLIENT_SECRET: markets-local-secret # hooks:allow local development only
+      TENANTS_MARKETS_CLIENT_SECRET: tenants-markets-local-secret # hooks:allow local development only
+      PLATFORM_ADMIN_USERNAME: platform-admin
+      PLATFORM_ADMIN_PASSWORD: platform-admin-local # hooks:allow local development only
+      # Imported as verified (no mail is sent to check it); a local address only.
+      PLATFORM_ADMIN_EMAIL: platform-admin@chance.localhost # hooks:allow local development only
+      # Verification mails go to Mailpit below: plain SMTP inside the compose network, no TLS and no login (with
+      # SMTP_AUTH=false Keycloak sends none; the two values below only fill the realm's placeholders).
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM: no-reply@chance.localhost
+      SMTP_SSL: "false"
+      SMTP_STARTTLS: "false"
+      SMTP_AUTH: "false"
+      SMTP_USER: mailpit-local # hooks:allow local development only
+      SMTP_PASSWORD: mailpit-local-unused # hooks:allow local development only
+      # The login with Google: placeholders, not a real OAuth client, so the "Google" button on the login page fails
+      # at Google until a real client exists (identity/README.md, "Google login"); every local account works as before.
+      GOOGLE_CLIENT_ID: chance-local-placeholder.apps.googleusercontent.com # hooks:allow local development only
+      GOOGLE_CLIENT_SECRET: google-local-placeholder-not-a-secret # hooks:allow local development only
+      JAVA_OPTS_KC_HEAP: -XX:MaxRAMPercentage=70
+    volumes:
+      - ../../identity/realm/chance-realm.json:/opt/keycloak/data/import/chance-realm.json:ro
+    # Development mode builds the server at every start, which takes more memory than the optimized image the cluster runs
+    # (1 GiB there). 2 GiB is an estimate, not a measurement: if the first start is killed (docker compose ps shows
+    # keycloak restarting or exited 137), raise it; docker stats shows the real use.
+    mem_limit: 2g
+    ports:
+      - "127.0.0.1:8081:8080"
+      - "127.0.0.1:9001:9000"
+    healthcheck:
+      # The image has no curl: a request over bash's /dev/tcp to the management port, 200 when the realm import and the
+      # database are ready.
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/9000 && printf "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && [[ "$$(cat <&3)" == "HTTP/1.1 200"* ]]'
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+  # The mail catcher: keeps every mail Keycloak sends (the verification mails of the sign-up) and shows them at
+  # http://localhost:8025, so nothing leaves the machine. SMTP (1025) is reachable inside the compose network only. The
+  # mails sit in Mailpit's temporary database inside the container and are gone with it. The pin is the one of
+  # identity/compose.yaml.
+  mailpit:
+    image: axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+    mem_limit: 128m
+    ports:
+      - "127.0.0.1:8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # The mock payment provider, built from the sibling repository (no image of it is published yet: the chart's
+  # image.repository is a placeholder). The API and the payment pages are at http://localhost:8082. Its webhooks go to
+  # the payments service running natively on this machine: the default below is the port of the table in README.md
+  # (payments on 8102). For another port, start the stack with
+  #   PAYMENTS_WEBHOOK_URL=http://host.docker.internal:PORT/v1/webhooks/payment-provider docker compose up -d
+  # The key and the secret are the ones payments uses locally.
+  payment-provider:
+    build: ../../payment-provider
+    image: chance-payment-provider:local
+    environment:
+      APP_ENV: local
+      PORT: "8080"
+      PROVIDER_API_KEY: provider-local-api-key # hooks:allow local development only
+      WEBHOOK_SECRET: provider-local-webhook-secret # hooks:allow local development only
+      WEBHOOK_URL: ${PAYMENTS_WEBHOOK_URL:-http://host.docker.internal:8102/v1/webhooks/payment-provider}
+      # The payment page as the buyer's browser reaches it.
+      PUBLIC_BASE_URL: http://localhost:8082
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8082:8080"
+    # The same hardening as in the cluster: read-only file system, no capabilities.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    healthcheck:
+      # The image has no curl or wget; Node 24 has fetch.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+volumes:
+  postgres-data:
+  nats-data:

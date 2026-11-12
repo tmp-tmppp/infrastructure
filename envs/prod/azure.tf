@@ -5,9 +5,24 @@
 
 locals {
   # Repositories whose deploy job logs in to Azure => the GitHub environment of that job.
-  # Add one line per service repository when it gets a deploy job (see README.md).
+  # Add one line per service repository when it gets a deploy job (see README.md). Every repository
+  # listed must exist on GitHub before the plan (its secrets' visibility is set by repository).
+  # audit-export has no AKS deploy job (an Azure Function, deployed separately), so it is not here.
   deploy_repositories = {
-    markets = "production"
+    markets          = "production"
+    trading          = "production"
+    market-data      = "production"
+    market-maker     = "production"
+    broker           = "production"
+    observability    = "production"
+    tenants          = "production"
+    payments         = "production"
+    audit            = "production"
+    payment-provider = "production"
+    identity         = "production"
+    gateway          = "production"
+    database         = "production"
+    web              = "production"
   }
 }
 

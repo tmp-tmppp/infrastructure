@@ -28,3 +28,7 @@ backend.hcl
 
 # Only the root configuration's dependency lock file is committed
 modules/**/.terraform.lock.hcl
+
+# The virtual environment and the working folder of the development-machine playbook (ansible/README.md)
+ansible/.venv/
+ansible/.ansible/

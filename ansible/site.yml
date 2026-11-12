@@ -1,0 +1,63 @@
+---
+# The development machine of Chance: the command-line tools at pinned versions, then read-only checks. It runs on this
+# machine only (localhost) and never deploys anything into Kubernetes: that is Helm's job, from each service's pipeline.
+#
+#   ansible-playbook site.yml --check --diff --ask-become-pass     dry run first: changes nothing
+#   ansible-playbook site.yml --ask-become-pass                    then for real
+#   ansible-playbook site.yml --tags helm,kubeconform             only some tools (tags: node docker kubectl helm
+#                                                                  kubeconform azure-cli terraform kind checks)
+#   ansible-playbook site.yml --tags checks                        the read-only checks alone: no sudo password needed
+# See README.md.
+- name: Set up the development machine
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  gather_subset:
+    - min
+  vars_files:
+    - vars/versions.yml
+
+  tasks:
+    - name: Check the platform (looks only, runs with every tag)
+      ansible.builtin.import_tasks: tasks/prepare.yml
+      tags: [always]
+
+    - name: Install what the installs need (packages, folders); not run by --tags checks
+      ansible.builtin.import_tasks: tasks/prepare_downloads.yml
+      tags: [node, docker, kubectl, helm, kubeconform, azure-cli, terraform, kind]
+
+    - name: Install Node.js and npm
+      ansible.builtin.import_tasks: tasks/node.yml
+      tags: [node]
+
+    - name: Install Docker Engine and the compose plugin
+      ansible.builtin.import_tasks: tasks/docker.yml
+      tags: [docker]
+
+    - name: Install kubectl
+      ansible.builtin.import_tasks: tasks/kubectl.yml
+      tags: [kubectl]
+
+    - name: Install Helm
+      ansible.builtin.import_tasks: tasks/helm.yml
+      tags: [helm]
+
+    - name: Install kubeconform
+      ansible.builtin.import_tasks: tasks/kubeconform.yml
+      tags: [kubeconform]
+
+    - name: Install the Azure CLI
+      ansible.builtin.import_tasks: tasks/azure_cli.yml
+      tags: [azure-cli]
+
+    - name: Install Terraform
+      ansible.builtin.import_tasks: tasks/terraform.yml
+      tags: [terraform]
+
+    - name: Install kind (optional)
+      ansible.builtin.import_tasks: tasks/kind.yml
+      tags: [kind]
+
+    - name: Run the read-only checks
+      ansible.builtin.import_tasks: tasks/checks.yml
+      tags: [checks]

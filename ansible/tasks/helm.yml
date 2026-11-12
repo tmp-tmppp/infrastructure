@@ -1,0 +1,18 @@
+---
+# The archive from get.helm.sh, checked against the .sha256sum file Helm publishes next to it.
+- name: Install Helm
+  ansible.builtin.include_tasks:
+    file: install_tool.yml
+    apply:
+      tags: [helm]
+  vars:
+    tool_name: helm
+    tool_version: "{{ helm_version }}"
+    tool_kind: archive
+    tool_url: "https://get.helm.sh/helm-v{{ helm_version }}-{{ tool_os }}-{{ tool_arch }}.tar.gz"
+    tool_checksum: "https://get.helm.sh/helm-v{{ helm_version }}-{{ tool_os }}-{{ tool_arch }}.tar.gz.sha256sum"
+    tool_unpack_opts:
+      - --strip-components=1
+    tool_links:
+      - path: helm
+        link: helm

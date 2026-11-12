@@ -1,0 +1,7 @@
+---
+# Only this machine. The connection is local (no SSH); the Python interpreter is discovered (on Debian and Ubuntu the
+# system python3, which has the apt bindings the apt module wants).
+all:
+  hosts:
+    localhost:
+      ansible_connection: local

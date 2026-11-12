@@ -1,0 +1,51 @@
+---
+# What the installs need, with the tags of the tools that install something (site.yml): the few packages the downloads
+# need, the folders of the tools, and the check that this machine can unpack the archives. It is not run by --tags checks.
+- name: Read the installed packages (Debian family)
+  ansible.builtin.package_facts:
+    manager: apt
+  when: ansible_facts['system'] == 'Linux'
+
+# The package lists are refreshed only when a package is missing, so a second run changes nothing, whatever its age.
+- name: Work out which packages are missing
+  ansible.builtin.set_fact:
+    missing_packages: "{{ ['ca-certificates', 'unzip'] | difference(ansible_facts['packages'].keys() | list) }}"
+  when: ansible_facts['system'] == 'Linux'
+
+- name: Install what the downloads need (Debian family)
+  ansible.builtin.apt:
+    name: "{{ missing_packages }}"
+    state: present
+    update_cache: true
+  become: true
+  when: ansible_facts['system'] == 'Linux' and missing_packages | length > 0
+
+- name: Create the folder of the tools
+  ansible.builtin.file:
+    path: "{{ tools_root }}"
+    state: directory
+    owner: root
+    mode: "0755"
+  become: true
+
+# No owner here: /usr/local/bin belongs to the user on a Mac with Homebrew, and the playbook must not take it over.
+- name: Create the bin folder if it does not exist
+  ansible.builtin.file:
+    path: "{{ tools_bin }}"
+    state: directory
+    mode: "0755"
+  become: true
+
+# macOS ships bsdtar, and the unpack module of Ansible accepts GNU tar only (it looks for gtar first, then tar).
+- name: Look for GNU tar (macOS)
+  ansible.builtin.command:
+    argv: [gtar, --version]
+  register: gtar_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: ansible_facts['system'] == 'Darwin'
+
+- name: Say whether the archives can be unpacked
+  ansible.builtin.set_fact:
+    have_gnu_tar: "{{ ansible_facts['system'] == 'Linux' or (gtar_version.rc | default(1)) == 0 }}"

@@ -1,0 +1,5 @@
+# Output of a run (README.md): service and compose logs, the results of the checks, the pids of the services.
+logs/
+results.json
+pids.txt
+__pycache__/

@@ -1,0 +1,23 @@
+---
+# The tarball of nodejs.org, checked against the SHASUMS256.txt next to it (the file is also signed by the Node.js
+# release team; the playbook trusts the checksum over TLS, not the signature).
+- name: Install Node.js and npm
+  ansible.builtin.include_tasks:
+    file: install_tool.yml
+    apply:
+      tags: [node]
+  vars:
+    tool_name: node
+    tool_version: "{{ node_version }}"
+    tool_kind: archive
+    tool_url: "https://nodejs.org/dist/v{{ node_version }}/node-v{{ node_version }}-{{ tool_os }}-{{ node_arch }}.tar.gz"
+    tool_checksum: "https://nodejs.org/dist/v{{ node_version }}/SHASUMS256.txt"
+    tool_unpack_opts:
+      - --strip-components=1
+    tool_links:
+      - path: bin/node
+        link: node
+      - path: bin/npm
+        link: npm
+      - path: bin/npx
+        link: npx

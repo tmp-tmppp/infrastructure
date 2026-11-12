@@ -94,7 +94,11 @@ data "github_team" "devs" {
 }
 
 resource "github_team_repository" "devs" {
-  for_each = toset(["markets", ".github"]) # add each new service repository here
+  # Each new service repository is added here; it must exist on GitHub before the plan.
+  for_each = toset([
+    ".github", "markets", "trading", "market-data", "market-maker", "broker", "observability",
+    "tenants", "payments", "audit", "payment-provider", "identity", "gateway", "database", "web", "audit-export",
+  ])
 
   team_id    = data.github_team.devs.id
   repository = each.key

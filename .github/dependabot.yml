@@ -3,6 +3,7 @@ updates:
   - package-ecosystem: terraform
     directories:
       - /envs/prod
+      - /envs/test
       - /modules/github-oidc
     schedule:
       interval: weekly
@@ -12,6 +13,35 @@ updates:
       prefix: "terraform"
     groups:
       terraform-providers:
+        patterns:
+          - "*"
+
+  # The images of the local development dependencies (local/compose.yaml); a bump is followed by the same bump in the
+  # services' own compose files and Dockerfiles (README, "Tool versions").
+  - package-ecosystem: docker-compose
+    directory: /local
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "local"
+    groups:
+      local-dependencies:
+        patterns:
+          - "*"
+
+  # ansible-core and ansible-lint of the development-machine playbook (ansible/requirements.txt).
+  - package-ecosystem: pip
+    directory: /ansible
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ansible"
+    groups:
+      ansible-tools:
         patterns:
           - "*"
 

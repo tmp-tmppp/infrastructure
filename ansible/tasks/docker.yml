@@ -1,0 +1,84 @@
+---
+# Docker Engine, the CLI, containerd, buildx and the compose plugin from Docker's own apt repository (Debian family).
+# The repository's public key is kept in files/docker.asc, so the playbook does not trust a key fetched at run time;
+# its fingerprint is 9DC8 5822 9FC7 DD38 854A  E2D8 8D81 803C 0EBF CD88 (docs.docker.com/engine/install). On macOS
+# Docker Desktop is installed by hand.
+- name: Say that Docker is installed by hand on this platform
+  ansible.builtin.debug:
+    msg: >-
+      Docker is not installed by the playbook on {{ ansible_facts['system'] }}. macOS: install Docker Desktop
+      (docker.com/products/docker-desktop). WSL with Docker Desktop: turn on its WSL integration and skip this tag
+      (--skip-tags docker).
+  when: ansible_facts['system'] != 'Linux'
+
+- name: Install Docker from Docker's apt repository
+  when: ansible_facts['system'] == 'Linux'
+  block:
+    - name: Create the folder of the apt keys
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        mode: "0755"
+      become: true
+
+    - name: Put Docker's repository key in place
+      ansible.builtin.copy:
+        src: docker.asc
+        dest: /etc/apt/keyrings/docker.asc
+        owner: root
+        mode: "0644"
+      become: true
+
+    - name: Add Docker's apt repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/docker.sources
+        owner: root
+        mode: "0644"
+        content: |
+          Types: deb
+          URIs: https://download.docker.com/linux/{{ ansible_facts['distribution'] | lower }}
+          Suites: {{ ansible_facts['distribution_release'] }}
+          Components: stable
+          Architectures: {{ tool_arch }}
+          Signed-By: /etc/apt/keyrings/docker.asc
+      become: true
+      register: docker_repository
+
+    - name: Update the package lists after a new repository
+      ansible.builtin.apt:
+        update_cache: true
+      become: true
+      when: docker_repository is changed and not ansible_check_mode
+
+    - name: Look for the repository file
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list.d/docker.sources
+      register: docker_repository_file
+
+    # A package that conflicts with these (docker.io, podman-docker, docker-compose from Ubuntu) is not removed: apt
+    # stops with its own message, and removing it is your decision.
+    - name: Install Docker Engine and the compose plugin
+      ansible.builtin.apt:
+        name:
+          - "docker-ce={{ docker_ce_version }}"
+          - "docker-ce-cli={{ docker_ce_version }}"
+          - "containerd.io={{ docker_containerd_version }}"
+          - "docker-buildx-plugin={{ docker_buildx_version }}"
+          - "docker-compose-plugin={{ docker_compose_plugin_version }}"
+        state: present
+      become: true
+      when: docker_repository_file.stat.exists
+
+    - name: Say that the packages wait for the repository
+      ansible.builtin.debug:
+        msg: "A real run adds Docker's repository first, then installs the packages (a dry run cannot list them yet)."
+      when: not docker_repository_file.stat.exists
+
+    - name: Let the user run docker without sudo (off by default)
+      ansible.builtin.user:
+        name: "{{ ansible_facts['user_id'] }}"
+        groups: docker
+        append: true
+      become: true
+      when: docker_add_user_to_group | bool and docker_repository_file.stat.exists

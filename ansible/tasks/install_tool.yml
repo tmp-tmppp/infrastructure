@@ -1,0 +1,132 @@
+---
+# Installs one tool from a vendor download, the same way for every tool: download into download_dir and check the
+# checksum, unpack into a folder of this version below tools_root, link the binaries into tools_bin. Nothing is
+# downloaded when this version is already installed, and an installed version is never overwritten.
+#
+# A dry run (--check) downloads nothing and creates nothing: for a version that is not installed it prints what a real
+# run would do, for an installed version it compares the links. (The download module cannot run in check mode on a
+# machine that has no download folder yet, and the link module refuses a link whose target does not exist yet.)
+#
+# Inputs (set by the including file):
+#   tool_name         folder name below tools_root
+#   tool_version      the pinned version
+#   tool_kind         archive (tar.gz or zip, unpacked) or binary (the download is the program)
+#   tool_url          the download
+#   tool_checksum     the vendor's checksum file: its URL (the file lists the hash, with the file name or alone)
+#   tool_unpack_opts  extra options for tar, for example --strip-components=1 (archives only)
+#   tool_links        list of {path: file in the unpacked folder, link: name in tools_bin}; the first one is the marker
+#                     that this version is installed
+- name: Work out the folders of this version
+  ansible.builtin.set_fact:
+    tool_dir: "{{ tools_root }}/{{ tool_name }}/{{ tool_version }}"
+    tool_download: "{{ download_dir }}/{{ tool_name }}-{{ tool_version }}-{{ tool_url | basename }}"
+
+- name: Look for this version, installed already
+  ansible.builtin.stat:
+    path: "{{ tool_dir }}/{{ tool_links[0].path }}"
+  register: tool_installed
+
+# The link module replaces a link, but refuses a regular file (a program installed by hand, for example by Helm's own
+# install script). That is found here, before anything is downloaded, and said in words.
+- name: Look at the names in the bin folder
+  ansible.builtin.stat:
+    path: "{{ tools_bin }}/{{ item.link }}"
+    follow: false
+  register: tool_link_state
+  loop: "{{ tool_links }}"
+  loop_control:
+    label: "{{ item.link }}"
+
+- name: Work out which names are taken by a program that is not a link
+  ansible.builtin.set_fact:
+    tool_in_the_way: "{{ tool_link_state.results | selectattr('stat.exists') | rejectattr('stat.islnk') | map(attribute='item.link') | list }}"
+
+- name: Stop when a program of the same name, not made by this playbook, is in the way
+  ansible.builtin.fail:
+    msg: >-
+      {{ tool_in_the_way | map('regex_replace', '^', tools_bin ~ '/') | join(', ') }} exists and is a file, not a link
+      made by this playbook (installed by hand or by another installer?). Remove or rename it, for example with
+      sudo mv, then run again: the playbook never deletes a program it did not install.
+  when: tool_in_the_way | length > 0 and not ansible_check_mode
+
+- name: Say that a program of the same name is in the way (dry run)
+  ansible.builtin.debug:
+    msg: >-
+      {{ tool_in_the_way | map('regex_replace', '^', tools_bin ~ '/') | join(', ') }} exists and is a file, not a link
+      made by this playbook. A real run stops here: remove or rename it first.
+  when: tool_in_the_way | length > 0 and ansible_check_mode
+
+# macOS ships bsdtar, and the unpack module of Ansible accepts GNU tar only (have_gnu_tar is set in prepare_downloads.yml).
+- name: Stop when the archive cannot be unpacked on this machine
+  ansible.builtin.assert:
+    that: have_gnu_tar | bool
+    fail_msg: "{{ tool_name }}: the unpack module needs GNU tar and this machine has bsdtar. macOS: brew install gnu-tar, then run again."
+    success_msg: "GNU tar is there"
+    quiet: true
+  when: tool_kind == 'archive' and tool_url.endswith('.tar.gz') and not tool_installed.stat.exists
+
+- name: Say what a real run does (dry run)
+  ansible.builtin.debug:
+    msg: >-
+      {{ tool_name }} {{ tool_version }} is not installed. A real run downloads {{ tool_url }}, checks it against
+      {{ tool_checksum }}, unpacks it into {{ tool_dir }} and links {{ tool_links | map(attribute='link') | join(', ') }}
+      into {{ tools_bin }}.
+  when: not tool_installed.stat.exists and ansible_check_mode
+
+- name: Download, check and unpack this version
+  when: not tool_installed.stat.exists and not ansible_check_mode
+  block:
+    - name: Create the folder of the downloads
+      ansible.builtin.file:
+        path: "{{ download_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download the file and check it against the vendor's checksum
+      ansible.builtin.get_url:
+        url: "{{ tool_url }}"
+        dest: "{{ tool_download }}"
+        checksum: "sha256:{{ tool_checksum }}"
+        mode: "0644"
+
+    - name: Create the folder of this version
+      ansible.builtin.file:
+        path: "{{ tool_dir }}"
+        state: directory
+        owner: root
+        mode: "0755"
+      become: true
+
+    # --no-same-owner: tar run by root would keep the user and group numbers stored in the vendor's archive, which could
+    # be those of an account on this machine. The files belong to root instead.
+    - name: Unpack the archive
+      ansible.builtin.unarchive:
+        src: "{{ tool_download }}"
+        dest: "{{ tool_dir }}"
+        remote_src: true
+        extra_opts: "{{ (['--no-same-owner'] if tool_url.endswith('.tar.gz') else []) + (tool_unpack_opts | default([])) }}"
+      become: true
+      when: tool_kind == 'archive'
+
+    - name: Put the program in place
+      ansible.builtin.copy:
+        src: "{{ tool_download }}"
+        dest: "{{ tool_dir }}/{{ tool_links[0].path }}"
+        remote_src: true
+        owner: root
+        mode: "0755"
+      become: true
+      when: tool_kind == 'binary'
+
+# In a dry run the link is looked at only when this version is installed: the link module refuses a link whose target
+# does not exist.
+- name: Link the program into the bin folder
+  ansible.builtin.file:
+    src: "{{ tool_dir }}/{{ item.path }}"
+    dest: "{{ tools_bin }}/{{ item.link }}"
+    state: link
+  become: true
+  loop: "{{ tool_links }}"
+  loop_control:
+    label: "{{ item.link }}"
+  when: (tool_installed.stat.exists or not ansible_check_mode) and item.link not in tool_in_the_way

@@ -1,0 +1,16 @@
+# Override of ../compose.yaml for the end-to-end run (run.sh): CPU caps on the dependencies, so the run never loads
+# every core of a laptop at once, and an optional prebuilt image of the mock payment provider.
+# PAYMENT_PROVIDER_IMAGE names an image that already exists (built from ../../../payment-provider); without it compose
+# builds chance-payment-provider:local on the first start, as ../compose.yaml does.
+services:
+  postgres:
+    cpus: 0.5
+  nats:
+    cpus: 0.5
+  keycloak:
+    cpus: 1.0
+  mailpit:
+    cpus: 0.5
+  payment-provider:
+    image: ${PAYMENT_PROVIDER_IMAGE:-chance-payment-provider:local}
+    cpus: 0.5

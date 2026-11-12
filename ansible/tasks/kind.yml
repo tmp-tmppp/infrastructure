@@ -1,0 +1,22 @@
+---
+# Optional (install_kind, off by default): the binary of the GitHub release, checked against its .sha256sum file.
+- name: Install kind
+  ansible.builtin.include_tasks:
+    file: install_tool.yml
+    apply:
+      tags: [kind]
+  vars:
+    tool_name: kind
+    tool_version: "{{ kind_version }}"
+    tool_kind: binary
+    tool_url: "https://github.com/kubernetes-sigs/kind/releases/download/v{{ kind_version }}/kind-{{ tool_os }}-{{ tool_arch }}"
+    tool_checksum: "https://github.com/kubernetes-sigs/kind/releases/download/v{{ kind_version }}/kind-{{ tool_os }}-{{ tool_arch }}.sha256sum"
+    tool_links:
+      - path: kind
+        link: kind
+  when: install_kind | bool
+
+- name: Say that kind is skipped
+  ansible.builtin.debug:
+    msg: "kind is not installed (optional, plan Q-17). To install it: -e install_kind=true"
+  when: not (install_kind | bool)

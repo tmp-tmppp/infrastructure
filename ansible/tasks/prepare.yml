@@ -1,0 +1,21 @@
+---
+# Runs for every tag (tags: always in site.yml), so it only looks and never needs sudo: the platform check and the
+# names the vendors use for this platform. What changes the machine (packages, folders) is in prepare_downloads.yml,
+# which runs with the tags of the tools that need it, so --tags checks asks for no password.
+- name: Refuse a platform the playbook was not written for
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['system'] in ['Linux', 'Darwin']
+      - ansible_facts['architecture'] in ['x86_64', 'amd64', 'aarch64', 'arm64']
+      - ansible_facts['system'] != 'Linux' or ansible_facts['distribution'] in ['Debian', 'Ubuntu']
+    fail_msg: >-
+      Supported: Debian or Ubuntu (also in WSL) or macOS, on x86_64 or arm64: the apt repositories of Docker and
+      Microsoft are written for those two names. This machine is {{ ansible_facts['system'] }} /
+      {{ ansible_facts['distribution'] }} / {{ ansible_facts['architecture'] }}.
+    success_msg: "{{ ansible_facts['system'] }} / {{ ansible_facts['distribution'] }} / {{ ansible_facts['architecture'] }}: supported"
+
+- name: Work out the names the vendors use for this platform
+  ansible.builtin.set_fact:
+    tool_os: "{{ ansible_facts['system'] | lower }}"
+    tool_arch: "{{ 'amd64' if ansible_facts['architecture'] in ['x86_64', 'amd64'] else 'arm64' }}"
+    node_arch: "{{ 'x64' if ansible_facts['architecture'] in ['x86_64', 'amd64'] else 'arm64' }}"

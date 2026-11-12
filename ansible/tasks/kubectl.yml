@@ -1,0 +1,16 @@
+---
+# The binary from dl.k8s.io, checked against the .sha256 file the Kubernetes project publishes next to it.
+- name: Install kubectl
+  ansible.builtin.include_tasks:
+    file: install_tool.yml
+    apply:
+      tags: [kubectl]
+  vars:
+    tool_name: kubectl
+    tool_version: "{{ kubectl_version }}"
+    tool_kind: binary
+    tool_url: "https://dl.k8s.io/release/v{{ kubectl_version }}/bin/{{ tool_os }}/{{ tool_arch }}/kubectl"
+    tool_checksum: "https://dl.k8s.io/release/v{{ kubectl_version }}/bin/{{ tool_os }}/{{ tool_arch }}/kubectl.sha256"
+    tool_links:
+      - path: kubectl
+        link: kubectl

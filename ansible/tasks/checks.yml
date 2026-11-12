@@ -1,0 +1,85 @@
+---
+# Read-only checks at the end. They report, and never fail the run: a missing tool, a Docker daemon that is not
+# running, no Azure login or no reachable cluster is information, not an error of the playbook. check_mode is off for
+# them, so they also run in the dry run: they read only versions and state, nothing is changed.
+# What is printed is kept free of identifiers: no subscription, account or cluster address.
+- name: Read the versions and the state
+  ansible.builtin.command:
+    argv: "{{ item.argv }}"
+  environment:
+    PATH: "{{ tools_bin }}:{{ lookup('ansible.builtin.env', 'PATH') }}"
+    CHECKPOINT_DISABLE: "1"
+  register: check_results
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  loop: "{{ checks + (kind_checks if install_kind | bool else []) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    checks:
+      - name: node
+        argv: [node, --version]
+        show: true
+        hint: "the tag node installs it"
+      - name: npm
+        argv: [npm, --version]
+        show: true
+        hint: "it comes with node"
+      - name: docker client
+        argv: [docker, --version]
+        show: true
+        hint: "the tag docker installs it (macOS: Docker Desktop)"
+      - name: docker compose
+        argv: [docker, compose, version]
+        show: true
+        hint: "the compose plugin comes with the docker tag"
+      - name: kubectl
+        argv: [kubectl, version, --client]
+        show: true
+        hint: "the tag kubectl installs it"
+      - name: helm
+        argv: [helm, version, --short]
+        show: true
+        hint: "the tag helm installs it"
+      - name: kubeconform
+        argv: [kubeconform, -v]
+        show: true
+        hint: "the tag kubeconform installs it"
+      - name: terraform
+        argv: [terraform, -version]
+        show: true
+        hint: "the tag terraform installs it"
+      - name: azure cli
+        argv: [az, version, --query, '"azure-cli"', --output, tsv]
+        show: true
+        hint: "the tag azure-cli installs it (macOS: brew install azure-cli)"
+      - name: docker daemon reachable
+        argv: [docker, info, --format, "{% raw %}{{.ServerVersion}}{% endraw %}"]
+        show: true
+        hint: "start Docker; without the docker group, docker needs sudo"
+      - name: azure login present
+        argv: [az, account, show, --output, none]
+        show: false
+        hint: "run: az login (the project's subscription is chosen as README.md of the infrastructure says)"
+      # timeout: --request-timeout bounds the API request only; a kubeconfig whose login plugin waits for a browser or a
+      # device code (Entra ID) would otherwise hold the run. macOS has no timeout command, so there only the request is bounded.
+      - name: kubernetes cluster reachable (current kubectl context)
+        argv: "{{ (['timeout', '15'] if ansible_facts['system'] == 'Linux' else []) + ['kubectl', 'cluster-info', '--request-timeout=10s'] }}"
+        show: false
+        hint: "no cluster in the current context, or it is stopped (az aks start)"
+    kind_checks:
+      - name: kind
+        argv: [kind, version]
+        show: true
+        hint: "the tag kind installs it (-e install_kind=true)"
+
+- name: Report the checks
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item.name }}:
+      {{ ('ok' ~ (' (' ~ item.stdout_lines[0] ~ ')' if item.item.show and item.stdout_lines | length > 0 else ''))
+      if item.rc == 0 else ('not available - ' ~ item.item.hint) }}
+  loop: "{{ check_results.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
