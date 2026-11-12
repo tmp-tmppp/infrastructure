@@ -1,4 +1,4 @@
 # The tools of the playbook itself, exact versions (pip install -r requirements.txt in a virtual environment).
 # ansible-core 2.21 needs Python 3.12 or newer on the machine that runs the playbook.
-ansible-core==2.21.6
+ansible-core==2.22.0
 ansible-lint==26.11.0
