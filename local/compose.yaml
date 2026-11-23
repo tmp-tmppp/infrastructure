@@ -20,7 +20,7 @@ services:
   # them when the data volume is empty (see there for adding one later). Each service creates its own tables at start
   # (its migrations); Keycloak creates its own too.
   postgres:
-    image: postgres:18.6-alpine
+    image: postgres:19.0-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres-local # hooks:allow local development only
@@ -41,7 +41,7 @@ services:
   # The same server version and flags as the broker repository's compose file (nats 2.15.2, JetStream on a volume);
   # the streams of the services (STREAM_MAX_AGE_DAYS, 30 days by default) are created by the publishers.
   nats:
-    image: nats:2.15.2-alpine
+    image: nats:2.15.3-alpine
     command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
     ports:
       - "127.0.0.1:4222:4222"
@@ -65,7 +65,7 @@ services:
   # http://localhost:9001/health/ready. The local login of the administrator and of the platform administrator are
   # below.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.2@sha256:3879c623248408de29a5303178b5816c77e8dfef3890c361f8c0bbeaa979ba3b
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
     command: ["start-dev", "--import-realm"]
     depends_on:
       postgres:
@@ -134,7 +134,7 @@ services:
   # mails sit in Mailpit's temporary database inside the container and are gone with it. The pin is the one of
   # identity/compose.yaml.
   mailpit:
-    image: axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
+    image: axllent/mailpit:v1.34.0@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
     mem_limit: 128m
     ports:
       - "127.0.0.1:8025:8025"
